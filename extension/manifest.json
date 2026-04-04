@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "AI Video Downloader",
+  "version": "1.0.0",
+  "description": "Adds a Download Video button to YouTube and forwards the URL to a native downloader.",
+  "permissions": ["activeTab", "nativeMessaging"],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

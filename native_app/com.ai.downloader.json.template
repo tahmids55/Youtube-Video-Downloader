@@ -1,0 +1,9 @@
+{
+  "name": "com.ai.downloader",
+  "description": "Native host for the AI Video Downloader prototype",
+  "path": "__DOWNLOADER_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__EXTENSION_ID__/"
+  ]
+}
