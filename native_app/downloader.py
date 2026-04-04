@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 HOST_NAME = "com.ai.downloader"
-DEFAULT_OUTPUT_DIR = Path.home() / "Downloads" / "AI Video Downloader"
+DEFAULT_OUTPUT_DIR = Path.home() / "Downloads" / "Engine Video Downloader"
 TERMINAL_CANDIDATES = [
     "x-terminal-emulator",
     "gnome-terminal",

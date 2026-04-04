@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "AI Video Downloader",
+  "name": "Engine Video Downloader",
   "version": "1.0.0",
   "description": "Adds a Download Video button to YouTube and forwards the URL to a native downloader.",
   "permissions": ["activeTab", "nativeMessaging"],

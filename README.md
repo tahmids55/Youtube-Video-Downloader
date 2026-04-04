@@ -1,4 +1,4 @@
-# AI Video Downloader Prototype
+# Engine Video Downloader Prototype
 
 Linux + Chrome prototype for injecting a `Download Video` button into the YouTube player and forwarding the current video URL to a native Python downloader via Chrome Native Messaging.
 
@@ -98,11 +98,11 @@ This writes the native messaging host manifest to:
 4. Click it.
 5. A terminal window should open and show `yt-dlp` progress.
 6. When the download finishes or fails, the terminal stays open until you press Enter.
-7. The same output is also written to `~/Downloads/AI Video Downloader/download.log`.
+7. The same output is also written to `~/Downloads/Engine Video Downloader/download.log`.
 8. Downloaded files are saved to:
 
 ```text
-~/Downloads/AI Video Downloader
+~/Downloads/Engine Video Downloader
 ```
 
 ## Notes
@@ -114,7 +114,7 @@ This writes the native messaging host manifest to:
 - If no supported terminal emulator is available, the downloader falls back to a background process and writes progress to:
 
 ```text
-~/Downloads/AI Video Downloader/download.log
+~/Downloads/Engine Video Downloader/download.log
 ```
 
 - The extension currently targets YouTube watch pages only.
@@ -143,7 +143,7 @@ With content like:
 ```json
 {
   "name": "com.ai.downloader",
-  "description": "Native host for the AI Video Downloader prototype",
+  "description": "Native host for the Engine Video Downloader prototype",
   "path": "/absolute/path/to/native_app/downloader.py",
   "type": "stdio",
   "allowed_origins": [
