@@ -169,7 +169,15 @@ def get_yt_dlp_environment() -> tuple[dict[str, str], str | None, str | None, st
 
 
 
-def build_yt_dlp_base_command(url: str, node_runtime: str | None, cookie_browser: str | None, yt_dlp_path: str) -> list[str]:
+def build_yt_dlp_base_command(
+    url: str,
+    node_runtime: str | None,
+    cookie_browser: str | None,
+    yt_dlp_path: str,
+    *,
+    include_cookies: bool = True,
+    extractor_args: str | None = None,
+) -> list[str]:
     command = [
         yt_dlp_path,
         "--newline",
@@ -181,11 +189,34 @@ def build_yt_dlp_base_command(url: str, node_runtime: str | None, cookie_browser
     if node_runtime:
         command.extend(["--js-runtimes", f"node:{node_runtime}"])
 
-    if cookie_browser:
+    if include_cookies and cookie_browser:
         command.extend(["--cookies-from-browser", cookie_browser])
+
+    if extractor_args:
+        command.extend(["--extractor-args", extractor_args])
 
     command.append(url)
     return command
+
+
+def is_youtube_url(url: str) -> bool:
+    lowered = url.lower()
+    return "youtube.com" in lowered or "youtu.be" in lowered
+
+
+def resolve_youtube_fallback_selector(format_selector: str) -> str:
+    selector = format_selector.strip()
+    if not selector:
+        return "bv*+ba/b"
+
+    lowered = selector.lower()
+    if "audio" in lowered and "video" not in lowered:
+        return "bestaudio/best"
+
+    if re.fullmatch(r"\d+(\+\d+)?", selector):
+        return "bv*+ba/b"
+
+    return selector
 
 
 
@@ -515,7 +546,47 @@ def run_worker(url: str, output_dir: str, format_selector: str = "") -> int:
     ]
 
     process = subprocess.Popen(command, env=environment)
-    return process.wait()
+    exit_code = process.wait()
+    if exit_code == 0:
+        return 0
+
+    should_retry_without_cookies = (
+        cookie_browser
+        and is_youtube_url(url)
+        and exit_code not in (130, 143)
+    )
+    if not should_retry_without_cookies:
+        return exit_code
+
+    fallback_selector = resolve_youtube_fallback_selector(format_selector)
+    print(
+        "Primary attempt failed. Retrying YouTube download without browser cookies using android client...",
+        flush=True,
+    )
+    print(
+        f"Fallback format selector: {fallback_selector}",
+        flush=True,
+    )
+
+    fallback_command = build_yt_dlp_base_command(
+        url,
+        node_runtime,
+        cookie_browser,
+        yt_dlp_path,
+        include_cookies=False,
+        extractor_args="youtube:player_client=android",
+    )
+    fallback_command[-1:-1] = [
+        "-f",
+        fallback_selector,
+        "--merge-output-format",
+        "mp4",
+        "-o",
+        template,
+    ]
+
+    fallback_process = subprocess.Popen(fallback_command, env=environment)
+    return fallback_process.wait()
 
 
 
