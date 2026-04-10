@@ -220,25 +220,49 @@ def extract_height_from_label(format_label: str) -> int | None:
     return None
 
 
+def is_hdr_format(format_info: dict) -> bool:
+    dynamic_range = str(format_info.get("dynamic_range") or "").upper()
+    format_note = str(format_info.get("format_note") or "").upper()
+    return "HDR" in dynamic_range or "HDR" in format_note
+
+
+def build_quality_selector(max_height: int | None, allow_hdr: bool = False) -> str:
+    if max_height and max_height > 0:
+        if allow_hdr:
+            return f"bv*[height<={max_height}]+ba/b"
+        return f"bv*[height<={max_height}][dynamic_range!=HDR]+ba/bv*[height<={max_height}]+ba/b"
+
+    if allow_hdr:
+        return "bv*+ba/b"
+    return "bv*[dynamic_range!=HDR]+ba/bv*+ba/b"
+
+
 def resolve_youtube_fallback_selector(format_selector: str, format_label: str = "") -> str:
     selector = format_selector.strip()
     if not selector:
-        return "bv*+ba/b"
+        return build_quality_selector(None, allow_hdr=False)
 
     lowered = selector.lower()
     lowered_label = format_label.strip().lower()
-    if "audio only" in lowered_label or ("audio" in lowered and "video" not in lowered):
+    audio_only_selectors = {
+        "bestaudio",
+        "bestaudio/best",
+        "ba",
+        "ba/best",
+        "bestaudio*",
+    }
+    if "audio only" in lowered_label or lowered in audio_only_selectors:
         return "bestaudio/best"
 
     target_height = extract_height_from_label(format_label)
     if target_height:
-        return f"bv*[height<={target_height}]+ba/b"
+        return build_quality_selector(target_height, allow_hdr=("hdr" in lowered_label))
 
     if "+" in selector and "/best" in selector:
-        return "bv*+ba/b"
+        return build_quality_selector(None, allow_hdr=("hdr" in lowered_label))
 
     if re.fullmatch(r"\d+(\+\d+)?", selector):
-        return "bv*+ba/b"
+        return build_quality_selector(target_height, allow_hdr=("hdr" in lowered_label))
 
     return selector
 
@@ -386,25 +410,74 @@ def format_size(format_info: dict) -> str:
     return f"{value:.1f} {units[index]}"
 
 
+def max_video_height(data: dict) -> int:
+    heights = [
+        int(item.get("height") or 0)
+        for item in data.get("formats", [])
+        if item.get("vcodec") not in (None, "none")
+    ]
+    return max(heights, default=0)
 
-def build_format_list(url: str) -> dict:
-    environment, yt_dlp_path, node_runtime, cookie_browser = get_yt_dlp_environment()
-    command = build_yt_dlp_base_command(url, node_runtime, cookie_browser, yt_dlp_path)
+
+def fetch_video_metadata(
+    url: str,
+    environment: dict[str, str],
+    yt_dlp_path: str,
+    node_runtime: str | None,
+    cookie_browser: str | None,
+    *,
+    include_cookies: bool,
+) -> tuple[dict | None, str | None]:
+    command = build_yt_dlp_base_command(
+        url,
+        node_runtime,
+        cookie_browser,
+        yt_dlp_path,
+        include_cookies=include_cookies,
+    )
     command[-1:-1] = ["--dump-single-json", "--no-download"]
 
     result = subprocess.run(command, capture_output=True, text=True, env=environment, check=False)
     if result.returncode != 0:
-        error = (result.stderr or result.stdout or "Could not list formats.").strip().splitlines()[-1]
+        error_lines = (result.stderr or result.stdout or "Could not list formats.").strip().splitlines()
+        return None, (error_lines[-1] if error_lines else "Could not list formats.")
+
+    return json.loads(result.stdout), None
+
+
+
+def build_format_list(url: str) -> dict:
+    environment, yt_dlp_path, node_runtime, cookie_browser = get_yt_dlp_environment()
+    data, error = fetch_video_metadata(
+        url,
+        environment,
+        yt_dlp_path,
+        node_runtime,
+        cookie_browser,
+        include_cookies=True,
+    )
+    if data is None:
         return {"ok": False, "error": error}
 
-    data = json.loads(result.stdout)
+    if is_youtube_url(url) and cookie_browser:
+        no_cookie_data, _ = fetch_video_metadata(
+            url,
+            environment,
+            yt_dlp_path,
+            node_runtime,
+            cookie_browser,
+            include_cookies=False,
+        )
+        if no_cookie_data and max_video_height(no_cookie_data) > max_video_height(data):
+            data = no_cookie_data
+
     formats = []
     seen = set()
 
-    best_selector = "bv*+ba/b"
+    best_selector = build_quality_selector(None, allow_hdr=False)
     formats.append({
         "label": "Best quality",
-        "meta": "Best video + audio",
+        "meta": "Best video + audio (SDR preferred)",
         "selector": best_selector,
         "recommended": True,
     })
@@ -430,6 +503,7 @@ def build_format_list(url: str) -> dict:
         key=lambda item: (
             int(item.get("height") or 0),
             float(item.get("fps") or 0),
+            -int(is_hdr_format(item)),
             float(item.get("tbr") or 0),
         ),
         reverse=True,
@@ -448,12 +522,16 @@ def build_format_list(url: str) -> dict:
         resolution = format_resolution(item)
         extension = item.get("ext", "video")
         fps = f"{int(item['fps'])}fps" if item.get("fps") else ""
+        hdr = "HDR" if is_hdr_format(item) else "SDR"
         size = format_size(item)
         audio_note = "Muxes best audio" if not has_audio else "Video + audio"
-        meta_parts = [part for part in [extension, fps, size, audio_note] if part]
+        meta_parts = [part for part in [extension, fps, hdr, size, audio_note] if part]
+        label = f"{resolution} • {extension.upper()}"
+        if hdr == "HDR":
+            label = f"{label} • HDR"
 
         formats.append({
-            "label": f"{resolution} • {extension.upper()}",
+            "label": label,
             "meta": " • ".join(meta_parts),
             "selector": selector,
             "recommended": False,
@@ -567,7 +645,7 @@ def run_worker(url: str, output_dir: str, format_selector: str = "", format_labe
     command = build_yt_dlp_base_command(url, node_runtime, cookie_browser, yt_dlp_path)
     command[-1:-1] = [
         "-f",
-        format_selector or "bv*+ba/b",
+        format_selector or build_quality_selector(None, allow_hdr=False),
         "--merge-output-format",
         "mp4",
         "-o",
