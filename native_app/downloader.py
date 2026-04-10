@@ -646,6 +646,9 @@ def run_worker(url: str, output_dir: str, format_selector: str = "", format_labe
     command[-1:-1] = [
         "-f",
         format_selector or build_quality_selector(None, allow_hdr=False),
+        "--fragment-retries",
+        "2",
+        "--abort-on-unavailable-fragments",
         "--merge-output-format",
         "mp4",
         "-o",
@@ -685,6 +688,9 @@ def run_worker(url: str, output_dir: str, format_selector: str = "", format_labe
     fallback_command[-1:-1] = [
         "-f",
         fallback_selector,
+        "--fragment-retries",
+        "2",
+        "--abort-on-unavailable-fragments",
         "--merge-output-format",
         "mp4",
         "-o",
@@ -711,6 +717,9 @@ def run_worker(url: str, output_dir: str, format_selector: str = "", format_labe
     compatibility_command[-1:-1] = [
         "-f",
         fallback_selector,
+        "--fragment-retries",
+        "2",
+        "--abort-on-unavailable-fragments",
         "--merge-output-format",
         "mp4",
         "-o",
