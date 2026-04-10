@@ -157,20 +157,12 @@ collect_dependency_status() {
     ok "aria2c found (optional segmented downloads available)"
   else
     warn "aria2c not found (optional)"
-    if [[ "$collect_targets" == "1" ]]; then
-      queue_system_package "aria2"
-      queue_missing_engine "aria2c"
-    fi
   fi
 
   if has_python_module secretstorage; then
     ok "python3-secretstorage available"
   else
     warn "python3-secretstorage missing; browser cookie decryption may fail"
-    if [[ "$collect_targets" == "1" ]]; then
-      queue_system_package "python3-secretstorage" "python3-secretstorage" "python-secretstorage"
-      queue_missing_engine "python3-secretstorage"
-    fi
   fi
 
   mapfile -t NODE_STATUS < <(detect_node_status)
@@ -181,29 +173,15 @@ collect_dependency_status() {
       ok "Node runtime selected: $NODE_PATH (v$NODE_VERSION)"
     else
       warn "Node runtime found but below 20: $NODE_PATH (v$NODE_VERSION)"
-      if [[ "$collect_targets" == "1" ]]; then
-        queue_system_package "nodejs"
-        queue_system_package "npm"
-        queue_missing_engine "nodejs>=20"
-      fi
     fi
   else
     warn "Node.js 20+ not detected; YouTube format extraction may fail"
-    if [[ "$collect_targets" == "1" ]]; then
-      queue_system_package "nodejs"
-      queue_system_package "npm"
-      queue_missing_engine "nodejs>=20"
-    fi
   fi
 
   if command -v x-terminal-emulator >/dev/null 2>&1 || command -v gnome-terminal >/dev/null 2>&1 || command -v konsole >/dev/null 2>&1 || command -v xfce4-terminal >/dev/null 2>&1 || command -v xterm >/dev/null 2>&1; then
     ok "Terminal emulator found"
   else
     warn "No supported terminal emulator found; downloader will fall back to log file mode"
-    if [[ "$collect_targets" == "1" ]]; then
-      queue_system_package "xterm"
-      queue_missing_engine "xterm"
-    fi
   fi
 
   if [[ "$collect_targets" == "1" && ${#PIP_PACKAGES[@]} -gt 0 ]]; then
