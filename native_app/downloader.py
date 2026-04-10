@@ -204,14 +204,38 @@ def is_youtube_url(url: str) -> bool:
     return "youtube.com" in lowered or "youtu.be" in lowered
 
 
-def resolve_youtube_fallback_selector(format_selector: str) -> str:
+def extract_height_from_label(format_label: str) -> int | None:
+    label = format_label.strip().lower()
+    if not label:
+        return None
+
+    res_match = re.search(r"(\d{3,4})x(\d{3,4})", label)
+    if res_match:
+        return int(res_match.group(2))
+
+    p_match = re.search(r"(\d{3,4})p", label)
+    if p_match:
+        return int(p_match.group(1))
+
+    return None
+
+
+def resolve_youtube_fallback_selector(format_selector: str, format_label: str = "") -> str:
     selector = format_selector.strip()
     if not selector:
         return "bv*+ba/b"
 
     lowered = selector.lower()
-    if "audio" in lowered and "video" not in lowered:
+    lowered_label = format_label.strip().lower()
+    if "audio only" in lowered_label or ("audio" in lowered and "video" not in lowered):
         return "bestaudio/best"
+
+    target_height = extract_height_from_label(format_label)
+    if target_height:
+        return f"bv*[height<={target_height}]+ba/b"
+
+    if "+" in selector and "/best" in selector:
+        return "bv*+ba/b"
 
     if re.fullmatch(r"\d+(\+\d+)?", selector):
         return "bv*+ba/b"
@@ -220,7 +244,7 @@ def resolve_youtube_fallback_selector(format_selector: str) -> str:
 
 
 
-def build_download_command(url: str, format_selector: str = "") -> list[str]:
+def build_download_command(url: str, format_selector: str = "", format_label: str = "") -> list[str]:
     output_dir = ensure_output_dir()
     command = [
         sys.executable,
@@ -233,6 +257,9 @@ def build_download_command(url: str, format_selector: str = "") -> list[str]:
 
     if format_selector:
         command.extend(["--format-selector", format_selector])
+
+    if format_label:
+        command.extend(["--format-label", format_label])
 
     return command
 
@@ -492,11 +519,11 @@ def handle_download_request(message: dict) -> dict:
         return {"ok": False, "error": "ffmpeg is not installed or not in PATH."}
 
     format_selector = message.get("formatSelector", "").strip()
-    command = build_download_command(url, format_selector)
+    format_label = message.get("formatLabel", "").strip()
+    command = build_download_command(url, format_selector, format_label)
     started, detail = launch_terminal(command)
     if started:
-        label = message.get("formatLabel", "").strip()
-        message_text = detail if not label else f"{detail} Selected format: {label}."
+        message_text = detail if not format_label else f"{detail} Selected format: {format_label}."
         return {"ok": True, "message": message_text}
 
     log(detail)
@@ -504,7 +531,7 @@ def handle_download_request(message: dict) -> dict:
 
 
 
-def run_worker(url: str, output_dir: str, format_selector: str = "") -> int:
+def run_worker(url: str, output_dir: str, format_selector: str = "", format_label: str = "") -> int:
     output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
     template = str(output_path / "%(title)s [%(id)s].%(ext)s")
@@ -522,6 +549,8 @@ def run_worker(url: str, output_dir: str, format_selector: str = "") -> int:
         print("JS runtime: not found; some YouTube formats may be unavailable", flush=True)
     if format_selector:
         print(f"Selected format: {format_selector}", flush=True)
+    if format_label:
+        print(f"Selected label: {format_label}", flush=True)
 
     if cookie_browser and sys.platform.startswith("linux") and not has_secretstorage():
         print(
@@ -558,9 +587,9 @@ def run_worker(url: str, output_dir: str, format_selector: str = "") -> int:
     if not should_retry_without_cookies:
         return exit_code
 
-    fallback_selector = resolve_youtube_fallback_selector(format_selector)
+    fallback_selector = resolve_youtube_fallback_selector(format_selector, format_label)
     print(
-        "Primary attempt failed. Retrying YouTube download without browser cookies using android client...",
+        "Primary attempt failed. Retrying YouTube download without browser cookies...",
         flush=True,
     )
     print(
@@ -574,7 +603,6 @@ def run_worker(url: str, output_dir: str, format_selector: str = "") -> int:
         cookie_browser,
         yt_dlp_path,
         include_cookies=False,
-        extractor_args="youtube:player_client=android",
     )
     fallback_command[-1:-1] = [
         "-f",
@@ -586,7 +614,33 @@ def run_worker(url: str, output_dir: str, format_selector: str = "") -> int:
     ]
 
     fallback_process = subprocess.Popen(fallback_command, env=environment)
-    return fallback_process.wait()
+    fallback_exit_code = fallback_process.wait()
+    if fallback_exit_code == 0:
+        return 0
+
+    print(
+        "No-cookie fallback failed. Retrying with android compatibility client...",
+        flush=True,
+    )
+    compatibility_command = build_yt_dlp_base_command(
+        url,
+        node_runtime,
+        cookie_browser,
+        yt_dlp_path,
+        include_cookies=False,
+        extractor_args="youtube:player_client=android",
+    )
+    compatibility_command[-1:-1] = [
+        "-f",
+        fallback_selector,
+        "--merge-output-format",
+        "mp4",
+        "-o",
+        template,
+    ]
+
+    compatibility_process = subprocess.Popen(compatibility_command, env=environment)
+    return compatibility_process.wait()
 
 
 
@@ -599,6 +653,7 @@ def parse_args(argv: list[str]) -> int:
         url = argv[2]
         output_dir = str(DEFAULT_OUTPUT_DIR)
         format_selector = ""
+        format_label = ""
         index = 3
         while index < len(argv):
             if argv[index] == "--output-dir" and index + 1 < len(argv):
@@ -609,9 +664,13 @@ def parse_args(argv: list[str]) -> int:
                 format_selector = argv[index + 1]
                 index += 2
                 continue
+            if argv[index] == "--format-label" and index + 1 < len(argv):
+                format_label = argv[index + 1]
+                index += 2
+                continue
             index += 1
 
-        return run_worker(url, output_dir, format_selector)
+        return run_worker(url, output_dir, format_selector, format_label)
 
     return run_host_loop()
 
