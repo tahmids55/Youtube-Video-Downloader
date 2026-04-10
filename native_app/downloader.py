@@ -226,15 +226,57 @@ def is_hdr_format(format_info: dict) -> bool:
     return "HDR" in dynamic_range or "HDR" in format_note
 
 
+def codec_priority(vcodec: str) -> int:
+    lowered = (vcodec or "").lower()
+    if lowered.startswith("avc1"):
+        return 3
+    if lowered.startswith("vp9"):
+        return 2
+    if lowered.startswith("av01"):
+        return 1
+    return 0
+
+
+def codec_label(vcodec: str) -> str:
+    lowered = (vcodec or "").lower()
+    if lowered.startswith("avc1"):
+        return "H264"
+    if lowered.startswith("vp9"):
+        return "VP9"
+    if lowered.startswith("av01"):
+        return "AV1"
+    if not lowered or lowered == "none":
+        return ""
+    return vcodec.split(".", 1)[0].upper()
+
+
 def build_quality_selector(max_height: int | None, allow_hdr: bool = False) -> str:
+    height_filter = f"[height<={max_height}]" if max_height and max_height > 0 else ""
     if max_height and max_height > 0:
         if allow_hdr:
-            return f"bv*[height<={max_height}]+ba/b"
-        return f"bv*[height<={max_height}][dynamic_range!=HDR]+ba/bv*[height<={max_height}]+ba/b"
+            return (
+                f"bv*{height_filter}[vcodec^=avc1]+ba/"
+                f"bv*{height_filter}[vcodec^=vp9]+ba/"
+                f"bv*{height_filter}[vcodec!*=av01]+ba/"
+                f"bv*{height_filter}+ba/b"
+            )
+        return (
+            f"bv*{height_filter}[dynamic_range!=HDR][vcodec^=avc1]+ba/"
+            f"bv*{height_filter}[dynamic_range!=HDR][vcodec^=vp9]+ba/"
+            f"bv*{height_filter}[dynamic_range!=HDR][vcodec!*=av01]+ba/"
+            f"bv*{height_filter}[dynamic_range!=HDR]+ba/"
+            f"bv*{height_filter}+ba/b"
+        )
 
     if allow_hdr:
-        return "bv*+ba/b"
-    return "bv*[dynamic_range!=HDR]+ba/bv*+ba/b"
+        return "bv*[vcodec^=avc1]+ba/bv*[vcodec^=vp9]+ba/bv*[vcodec!*=av01]+ba/bv*+ba/b"
+    return (
+        "bv*[dynamic_range!=HDR][vcodec^=avc1]+ba/"
+        "bv*[dynamic_range!=HDR][vcodec^=vp9]+ba/"
+        "bv*[dynamic_range!=HDR][vcodec!*=av01]+ba/"
+        "bv*[dynamic_range!=HDR]+ba/"
+        "bv*+ba/b"
+    )
 
 
 def resolve_youtube_fallback_selector(format_selector: str, format_label: str = "") -> str:
@@ -503,6 +545,7 @@ def build_format_list(url: str) -> dict:
         key=lambda item: (
             int(item.get("height") or 0),
             float(item.get("fps") or 0),
+            codec_priority(str(item.get("vcodec") or "")),
             -int(is_hdr_format(item)),
             float(item.get("tbr") or 0),
         ),
@@ -521,11 +564,12 @@ def build_format_list(url: str) -> dict:
 
         resolution = format_resolution(item)
         extension = item.get("ext", "video")
+        codec = codec_label(str(item.get("vcodec") or ""))
         fps = f"{int(item['fps'])}fps" if item.get("fps") else ""
         hdr = "HDR" if is_hdr_format(item) else "SDR"
         size = format_size(item)
         audio_note = "Muxes best audio" if not has_audio else "Video + audio"
-        meta_parts = [part for part in [extension, fps, hdr, size, audio_note] if part]
+        meta_parts = [part for part in [extension, codec, fps, hdr, size, audio_note] if part]
         label = f"{resolution} • {extension.upper()}"
         if hdr == "HDR":
             label = f"{label} • HDR"
