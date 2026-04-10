@@ -192,12 +192,11 @@ collect_dependency_status() {
   fi
 }
 
-run_engine_install_background() {
+run_engine_install_foreground() {
   local log_file="$INSTALL_LOG_PATH"
   mkdir -p "$DOWNLOAD_DIR"
 
-  (
-    set -euo pipefail
+  {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Engine installation started"
     echo "Package manager: $PKG_MANAGER"
 
@@ -233,23 +232,9 @@ run_engine_install_background() {
     fi
 
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Engine installation finished"
-  ) >"$log_file" 2>&1 &
+  } 2>&1 | tee "$log_file"
 
-  echo $!
-}
-
-wait_for_background_install() {
-  local pid="$1"
-  local spin='|/-\\'
-  local i=0
-
-  while kill -0 "$pid" 2>/dev/null; do
-    i=$(( (i + 1) % 4 ))
-    printf "\r  Installing missing engines in background... %c" "${spin:$i:1}"
-    sleep 0.2
-  done
-
-  wait "$pid"
+  return ${PIPESTATUS[0]}
 }
 
 has_python_module() {
@@ -342,16 +327,13 @@ if [[ ${#MISSING_ENGINES[@]} -gt 0 ]]; then
       exit 1
     fi
 
-    echo -e "\n${YELLOW}[3/6]${NC} Installing missing engines in background (sequential)..."
+    echo -e "\n${YELLOW}[3/6]${NC} Installing missing engines..."
     echo "  Install log: $INSTALL_LOG_PATH"
-    INSTALL_PID="$(run_engine_install_background)"
-    if wait_for_background_install "$INSTALL_PID"; then
-      printf "\r"
-      ok "Background engine installation completed"
+    
+    if run_engine_install_foreground; then
+      ok "Engine installation completed"
     else
-      printf "\r"
-      fail "Background engine installation failed. Check log: $INSTALL_LOG_PATH"
-      exit 1
+      fail "Engine installation encountered errors. Check log: $INSTALL_LOG_PATH"
     fi
 
     echo -e "\n${YELLOW}[4/6]${NC} Re-checking dependencies after installation..."
